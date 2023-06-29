@@ -8,5 +8,6 @@ export const CONFIG_COLLECTION = '__conf__'
 
 export const WEBSOCKET_FUNCTION_NAME = '__websocket__'
 export const INTERCEPTOR_FUNCTION_NAME = '__interceptor__'
+export const RESPONSE_INTERCEPTOR_FUNCTION_NAME = '__response__'
 export const DEFAULT_FUNCTION_NAME = '__default__'
 export const INIT_FUNCTION_NAME = '__init__'

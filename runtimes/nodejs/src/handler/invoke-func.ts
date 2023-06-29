@@ -1,11 +1,11 @@
 import { Response } from 'express'
-import { FunctionContext } from '../support/function-engine'
+import { FunctionContext, FunctionResult } from '../support/function-engine'
 import { logger } from '../support/logger'
 import { CloudFunction } from '../support/function-engine'
 import { IRequest } from '../support/types'
 import { handleDebugFunction } from './debug-func'
 import { parseToken } from '../support/token'
-import { DEFAULT_FUNCTION_NAME, INTERCEPTOR_FUNCTION_NAME } from '../constants'
+import { DEFAULT_FUNCTION_NAME, INTERCEPTOR_FUNCTION_NAME, RESPONSE_INTERCEPTOR_FUNCTION_NAME } from '../constants'
 
 /**
  * Handler of invoking cloud function
@@ -90,7 +90,9 @@ export async function handleInvokeFunction(req: IRequest, res: Response) {
       if (typeof result.data === 'number') {
         data = Number(result.data).toString()
       }
-      return res.send(data)
+      const interceptResult = await invokeResponseInterceptor(req, res, data)
+
+      return res.send(interceptResult.data)
     }
   } catch (error) {
     logger.error(requestId, 'failed to invoke error', error)
@@ -157,6 +159,65 @@ async function invokeInterceptor(req: IRequest, res: Response) {
 
     // pass the request
     return result.data
+  } catch (error) {
+    logger.error(requestId, `failed to invoke ${func_name}`, error)
+    return res
+      .status(500)
+      .send(`Internal Server Error - got error in ${func_name}`)
+  }
+}
+
+async function invokeResponseInterceptor(req: IRequest, res: Response, result: any) {
+  const requestId = req.requestId
+  const func_name = RESPONSE_INTERCEPTOR_FUNCTION_NAME
+
+  // load function data from db
+  const funcData = CloudFunction.getFunctionByName(func_name)
+  //pass if no response interceptor
+  if (!funcData) {
+    return result
+  }
+
+  const func = new CloudFunction(funcData)
+
+  try {
+    //execute the func
+    const ctx: FunctionContext = {
+      query: req.query,
+      files: req.files as any,
+      body: req.body,
+      headers: req.headers,
+      method: req.method,
+      auth: req['auth'],
+      user: req.user,
+      requestId,
+      request: req,
+      response: res,
+      result: result,
+      __function_name: func.name,
+    }
+    const resultData = await func.invoke(ctx)
+
+    if (resultData.error) {
+      logger.error(
+        requestId,
+        `invoke function ${func_name} invoke error: `,
+        resultData,
+      )
+
+      res.status(400).send({
+        error: `invoke ${func_name} function got error, please check the function logs`,
+        requestId,
+      })
+      return false
+    }
+    // if response has been ended, return false to stop the request
+    if (res.writableEnded) {
+      return false
+    }
+
+    return resultData.data
+
   } catch (error) {
     logger.error(requestId, `failed to invoke ${func_name}`, error)
     return res
